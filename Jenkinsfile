@@ -1,5 +1,10 @@
 pipeline {
-    agent any
+    agent {
+        docker {
+            image 'python:3.11-slim'
+            args '-v /var/run/docker.sock:/var/run/docker.sock -u root'
+        }
+    }
     
     environment {
         DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
@@ -8,10 +13,22 @@ pipeline {
     }
     
     stages {
-        stage('Checkout') {
+        stage('Debug') {
             steps {
-                echo 'Checking out code...'
-                checkout scm
+                echo 'Checking Jenkinsfile contents...'
+                sh 'head -20 Jenkinsfile'
+                sh 'pwd'
+                sh 'ls -la'
+            }
+        }
+
+        stage('Setup') {
+            steps {
+                echo 'Installing Docker CLI inside container...'
+                sh '''
+                    apt-get update -qq
+                    apt-get install -y docker.io
+                '''
             }
         }
         
@@ -19,7 +36,7 @@ pipeline {
             steps {
                 echo 'Running tests...'
                 sh '''
-                    pip3 install -r requirements.txt
+                    pip install --no-cache-dir -r requirements.txt
                     pytest -v --cov=app tests/
                 '''
             }
@@ -39,9 +56,10 @@ pipeline {
             steps {
                 echo 'Pushing to DockerHub...'
                 sh """
-                    echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin
+                    echo \${DOCKERHUB_CREDENTIALS_PSW} | docker login -u \${DOCKERHUB_CREDENTIALS_USR} --password-stdin
                     docker push ${IMAGE_NAME}:${IMAGE_TAG}
                     docker push ${IMAGE_NAME}:latest
+                    docker logout
                 """
             }
         }
@@ -51,7 +69,7 @@ pipeline {
                 echo 'Cleaning up...'
                 sh """
                     docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true
-                    docker logout
+                    docker rmi ${IMAGE_NAME}:latest || true
                 """
             }
         }
